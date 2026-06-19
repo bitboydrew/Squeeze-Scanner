@@ -1,0 +1,2 @@
+# Crypto-Squeeze-Scanner
+Scanner
