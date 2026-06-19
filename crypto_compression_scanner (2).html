@@ -1,0 +1,493 @@
+<!--
+  CRYPTO COMPRESSION SCANNER — Binance REST polling version
+  ============================================================
+  WHAT THIS IS:
+  Scans 15 major USDT pairs on Binance for Bollinger Band squeeze
+  and volume compression setups, on 15m / 1h / both timeframes.
+  Auto-refreshes every 15 seconds via Binance's public REST API.
+  No API key required.
+
+  HOW TO DEPLOY (GitHub Pages):
+  1. Create a public GitHub repo
+  2. Upload this file, renamed to "index.html"
+  3. Repo Settings -> Pages -> Branch: main, folder: / (root) -> Save
+  4. Your live URL: https://<your-username>.github.io/<repo-name>/
+
+  NOTE: Opening this file directly on mobile (file://) will fail
+  with "Failed to fetch" because mobile browsers block outbound
+  network requests from local files. Hosting it (GitHub Pages,
+  Netlify, etc.) as a real https:// URL fixes this completely.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crypto Compression Scanner · Binance Live</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d0f14; --bg2: #151821; --bg3: #1c1f2b; --bg4: #242736;
+    --border: rgba(255,255,255,0.08); --border2: rgba(255,255,255,0.14);
+    --text: #e8eaf0; --text2: #8b8fa8; --text3: #555870;
+    --purple: #7f77dd; --purple-bg: rgba(127,119,221,0.12);
+    --green: #1d9e75; --green-bg: rgba(29,158,117,0.12);
+    --amber: #ef9f27; --amber-bg: rgba(239,159,39,0.12);
+    --red: #e24b4a; --red-bg: rgba(226,75,74,0.12);
+    --blue: #378add; --blue-bg: rgba(55,138,221,0.12);
+    --coral: #d85a30;
+    --radius: 8px; --radius-lg: 12px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; min-height: 100vh; }
+  .app { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
+
+  .top-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-icon { width: 32px; height: 32px; background: var(--purple-bg); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; }
+  .brand-icon svg { width: 18px; height: 18px; stroke: var(--purple); fill: none; stroke-width: 2; stroke-linecap: round; }
+  .brand h1 { font-size: 17px; font-weight: 600; color: var(--text); }
+  .brand-sub { font-size: 11px; color: var(--text3); margin-top: 1px; }
+
+  .live-pill { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border2); color: var(--text2); background: var(--bg2); transition: all .3s; }
+  .live-pill.connecting { border-color: var(--amber); color: var(--amber); }
+  .live-pill.live { border-color: var(--green); color: var(--green); background: var(--green-bg); }
+  .live-pill.error { border-color: var(--red); color: var(--red); background: var(--red-bg); }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .live-dot.pulse { animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(1.4)} }
+
+  .countdown-wrap { display: flex; align-items: center; gap: 8px; }
+  .countdown-ring { position: relative; width: 28px; height: 28px; }
+  .countdown-ring svg { transform: rotate(-90deg); }
+  .countdown-ring .track { fill: none; stroke: var(--bg4); stroke-width: 3; }
+  .countdown-ring .fill  { fill: none; stroke: var(--purple); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 69.1; transition: stroke-dashoffset .9s linear; }
+  .countdown-num { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; color: var(--text2); }
+
+  .metrics-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 20px; }
+  .mc { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; }
+  .mc-l { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+  .mc-v { font-size: 26px; font-weight: 600; color: var(--text); }
+  .mc-v.purple { color: var(--purple); } .mc-v.green { color: var(--green); } .mc-v.amber { color: var(--amber); }
+  .mc-s { font-size: 10px; color: var(--text3); margin-top: 3px; }
+
+  .toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 10px; }
+  .filter-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .fl { font-size: 11px; color: var(--text3); margin-right: 2px; }
+  .tf-btn { padding: 6px 16px; font-size: 13px; border: 1px solid var(--border2); border-radius: var(--radius); background: transparent; color: var(--text2); cursor: pointer; transition: all .15s; }
+  .tf-btn:hover { border-color: var(--purple); color: var(--purple); }
+  .tf-btn.active { background: var(--purple-bg); color: var(--purple); border-color: var(--purple); font-weight: 500; }
+  .fb { padding: 4px 12px; font-size: 11px; border: 1px solid var(--border); border-radius: 20px; background: transparent; color: var(--text2); cursor: pointer; transition: all .15s; }
+  .fb:hover { border-color: var(--border2); color: var(--text); }
+  .fb.active { background: var(--blue-bg); color: var(--blue); border-color: var(--blue); }
+
+  .leg { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+  .li { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text3); }
+  .ld { width: 7px; height: 7px; border-radius: 50%; }
+
+  .progress-bar { height: 2px; background: var(--bg3); border-radius: 1px; margin-bottom: 16px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--purple); border-radius: 1px; transition: width .4s; }
+
+  .table-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 12px; }
+  .thead { display: grid; grid-template-columns: 130px 95px 90px 95px 110px 1fr 65px; padding: 10px 16px; background: var(--bg3); border-bottom: 1px solid var(--border); }
+  .thead span { font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; }
+  .trow { display: grid; grid-template-columns: 130px 95px 90px 95px 110px 1fr 65px; padding: 11px 16px; border-bottom: 1px solid var(--border); align-items: center; transition: background .1s; }
+  .trow:last-child { border-bottom: none; }
+  .trow:hover { background: var(--bg3); }
+  .trow.flash-up { animation: flashUp .6s ease; }
+  .trow.flash-dn { animation: flashDn .6s ease; }
+  @keyframes flashUp { 0%{background:rgba(29,158,117,.25)} 100%{background:transparent} }
+  @keyframes flashDn { 0%{background:rgba(226,75,74,.18)} 100%{background:transparent} }
+
+  .pname { font-size: 13px; font-weight: 600; color: var(--text); }
+  .psub { font-size: 10px; color: var(--text3); margin-top: 1px; }
+  .pval { font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .pval.up { color: var(--green); } .pval.dn { color: var(--red); } .pval.flat { color: var(--text); }
+  .bwn { font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .bwt { height: 4px; background: var(--bg4); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+  .bwf { height: 100%; border-radius: 2px; transition: width .5s; }
+  .vc { font-size: 11px; padding: 3px 8px; border-radius: 20px; display: inline-block; font-weight: 500; }
+  .vc-low  { background: var(--green-bg); color: var(--green); }
+  .vc-norm { background: var(--blue-bg);  color: var(--blue);  }
+  .vc-high { background: var(--amber-bg); color: var(--amber); }
+  .sig { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; display: inline-block; }
+  .sig-sq { background: var(--purple-bg); color: var(--purple); }
+  .sig-br { background: var(--green-bg);  color: var(--green);  }
+  .sig-wa { background: var(--amber-bg);  color: var(--amber);  }
+  .sig-no { background: var(--bg4);       color: var(--text3);  }
+  .sdots { display: flex; gap: 4px; align-items: center; }
+  .sd { width: 8px; height: 8px; border-radius: 50%; }
+  .scn { font-size: 13px; font-weight: 600; text-align: right; }
+
+  .alert { border-radius: var(--radius); padding: 10px 14px; font-size: 12px; margin-bottom: 14px; border: 1px solid; display: none; line-height: 1.6; }
+  .alert-err  { background: var(--red-bg);   color: #f09595; border-color: rgba(226,75,74,.3); }
+  .alert-warn { background: var(--amber-bg); color: var(--amber); border-color: rgba(239,159,39,.3); }
+
+  .footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 10px; color: var(--text3); padding: 0 2px; }
+  .loading-state { padding: 3rem; text-align: center; color: var(--text2); font-size: 13px; line-height: 2; }
+  .spin { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--bg4); border-top-color: var(--purple); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 700px) {
+    .metrics-row { grid-template-columns: repeat(2,1fr); }
+    .thead, .trow { grid-template-columns: 110px 80px 72px 80px 90px; }
+    .thead span:nth-child(n+6), .trow > *:nth-child(n+6) { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="top-bar">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+      </div>
+      <div>
+        <h1>Compression Scanner</h1>
+        <div class="brand-sub">Binance REST · Bollinger Bands + Volume · Auto-refresh</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+      <div class="live-pill connecting" id="livePill">
+        <div class="live-dot" id="liveDot"></div>
+        <span id="liveLabel">Starting…</span>
+      </div>
+      <div class="countdown-wrap">
+        <div class="countdown-ring">
+          <svg viewBox="0 0 24 24" width="28" height="28">
+            <circle class="track" cx="12" cy="12" r="11"/>
+            <circle class="fill"  cx="12" cy="12" r="11" id="countRing" style="stroke-dashoffset:0"/>
+          </svg>
+          <div class="countdown-num" id="countNum">—</div>
+        </div>
+        <span style="font-size:11px;color:var(--text3);">next scan</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-err"  id="errBar"></div>
+  <div class="alert alert-warn" id="warnBar"></div>
+
+  <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+
+  <div class="metrics-row">
+    <div class="mc"><div class="mc-l">Squeezes</div><div class="mc-v purple" id="mSq">—</div><div class="mc-s">BB width &lt; 2%</div></div>
+    <div class="mc"><div class="mc-l">Breakouts</div><div class="mc-v amber"  id="mBr">—</div><div class="mc-s">Expanding now</div></div>
+    <div class="mc"><div class="mc-l">Vol compressed</div><div class="mc-v green"  id="mVol">—</div><div class="mc-s">Ratio &lt; 0.7×</div></div>
+    <div class="mc"><div class="mc-l">High confluence</div><div class="mc-v green"  id="mConf">—</div><div class="mc-s">Score ≥ 4/5</div></div>
+  </div>
+
+  <div class="toolbar">
+    <div class="filter-row">
+      <span class="fl">Timeframe:</span>
+      <div id="tfControls" style="display:flex;gap:6px;">
+        <button class="tf-btn active" data-tf="15m">15m</button>
+        <button class="tf-btn" data-tf="1h">1h</button>
+        <button class="tf-btn" data-tf="both">Both TF</button>
+      </div>
+    </div>
+    <div class="filter-row">
+      <span class="fl">Signal:</span>
+      <button class="fb active" data-filter="all">All</button>
+      <button class="fb" data-filter="squeeze">⚡ Squeeze</button>
+      <button class="fb" data-filter="breakout">↗ Breakout</button>
+      <button class="fb" data-filter="watch">👁 Watch</button>
+    </div>
+  </div>
+
+  <div class="leg">
+    <span class="li"><span class="ld" style="background:#7f77dd"></span>BB squeeze (&lt;2%)</span>
+    <span class="li"><span class="ld" style="background:#1d9e75"></span>Vol contraction</span>
+    <span class="li"><span class="ld" style="background:#ef9f27"></span>Tight (&lt;1.5%)</span>
+    <span class="li"><span class="ld" style="background:#378add"></span>Keltner inside BB</span>
+    <span class="li"><span class="ld" style="background:#d85a30"></span>Vol divergence</span>
+  </div>
+
+  <div class="table-wrap">
+    <div class="thead">
+      <span>Pair</span><span>Price</span><span>BB Width</span><span>Vol ratio</span><span>Signal</span><span>Confluence</span><span>Score</span>
+    </div>
+    <div id="tableBody">
+      <div class="loading-state"><div class="spin"></div><br>Fetching live data from Binance…</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span id="lastUpdate">—</span>
+    <span id="pairStatus">0 / 15 pairs loaded</span>
+    <span>Binance public API · No key required · Refreshes every 15s</span>
+  </div>
+
+</div>
+<script>
+const PAIRS = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','AVAXUSDT','MATICUSDT','LINKUSDT','ARBUSDT','DOGEUSDT','ADAUSDT','OPUSDT','DOTUSDT','LTCUSDT','ATOMUSDT'];
+const DISP  = {BTCUSDT:'BTC/USDT',ETHUSDT:'ETH/USDT',SOLUSDT:'SOL/USDT',BNBUSDT:'BNB/USDT',XRPUSDT:'XRP/USDT',AVAXUSDT:'AVAX/USDT',MATICUSDT:'MATIC/USDT',LINKUSDT:'LINK/USDT',ARBUSDT:'ARB/USDT',DOGEUSDT:'DOGE/USDT',ADAUSDT:'ADA/USDT',OPUSDT:'OP/USDT',DOTUSDT:'DOT/USDT',LTCUSDT:'LTC/USDT',ATOMUSDT:'ATOM/USDT'};
+
+const BB_PERIOD = 20, BB_MULT = 2, VOL_PERIOD = 20, KC_MULT = 1.5;
+const REFRESH_SEC = 15;
+const BASE = 'https://api.binance.com';
+
+let currentTf = '15m', currentFilter = 'all';
+let scanResults = {}, lastPrices = {};
+let scanTimer = null, countTimer = null, countSec = 0;
+let isScanning = false;
+
+function mean(a) { return a.reduce((s,v)=>s+v,0)/a.length; }
+function stddev(a) { const m=mean(a); return Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length); }
+function calcATR(candles, p) {
+  const trs = candles.slice(1).map((c,i)=>Math.max(c.h-c.l, Math.abs(c.h-candles[i].c), Math.abs(c.l-candles[i].c)));
+  return trs.length ? mean(trs.slice(-p)) : 0;
+}
+
+function computeIndicators(candles) {
+  if (candles.length < 30) return null;
+  const closes = candles.map(c=>c.c);
+  const vols   = candles.map(c=>c.v);
+
+  const rc    = closes.slice(-BB_PERIOD);
+  const bbMid = mean(rc);
+  const bbStd = stddev(rc);
+  const bbU   = bbMid + BB_MULT*bbStd;
+  const bbL   = bbMid - BB_MULT*bbStd;
+  const bbW   = ((bbU-bbL)/bbMid)*100;
+
+  const pcLen = Math.min(BB_PERIOD, closes.length-10);
+  const pc    = closes.slice(-(pcLen+8), -8);
+  let pW = bbW;
+  if (pc.length >= 5) {
+    const pMid = mean(pc), pStd = stddev(pc);
+    pW = ((pMid+BB_MULT*pStd-(pMid-BB_MULT*pStd))/pMid)*100;
+  }
+  const isSqueezing = bbW < pW * 0.92;
+
+  const atr  = calcATR(candles.slice(-25), 20);
+  const kMid = mean(closes.slice(-20));
+  const keltnerInsideBB = atr > 0 && bbL < (kMid - KC_MULT*atr) && bbU > (kMid + KC_MULT*atr);
+
+  const recentVol = mean(vols.slice(-5));
+  const avgVol    = mean(vols.slice(-VOL_PERIOD));
+  const volRatio  = avgVol > 0 ? recentVol/avgVol : 1;
+
+  const last = closes.length;
+  const m5  = last>5  ? closes[last-1]-closes[last-6]  : 0;
+  const m10 = last>10 ? closes[last-1]-closes[last-11] : 0;
+  const momDiv = (bbW < 2.5) && (Math.abs(m5) > Math.abs(m10)*0.4);
+
+  const scoreDots = [];
+  if (bbW < 2.0)       scoreDots.push('purple');
+  if (volRatio < 0.7)  scoreDots.push('green');
+  if (bbW < 1.5)       scoreDots.push('amber');
+  if (keltnerInsideBB) scoreDots.push('blue');
+  if (momDiv)          scoreDots.push('coral');
+
+  let signal = 'none';
+  if (bbW < 2.0 && volRatio < 0.7)                           signal = 'squeeze';
+  else if (bbW < 3.0 && !isSqueezing && scoreDots.length>=2) signal = 'breakout';
+  else if (bbW < 3.5 || volRatio < 0.7 || keltnerInsideBB)  signal = 'watch';
+
+  return {
+    bbW, volRatio,
+    volLow: volRatio<0.7, volHigh: volRatio>1.4,
+    keltnerInsideBB, signal, scoreDots,
+    price: closes[closes.length-1],
+    prevPrice: closes[closes.length-2] || closes[closes.length-1]
+  };
+}
+
+async function fetchKlines(symbol, interval, limit=120) {
+  const url = `${BASE}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status}`);
+  const raw = await res.json();
+  return raw.map(k => ({ o:+k[1], h:+k[2], l:+k[3], c:+k[4], v:+k[5] }));
+}
+
+function getMerged(sym) {
+  const r = scanResults[sym];
+  if (!r) return null;
+  if (currentTf==='15m') return r.m15||null;
+  if (currentTf==='1h')  return r.h1||null;
+  if (currentTf==='both') {
+    const a=r.m15, b=r.h1;
+    if (!a&&!b) return null;
+    if (!a) return b;
+    if (!b) return a;
+    const dots = [...new Set([...a.scoreDots,...b.scoreDots])].slice(0,5);
+    let signal='none';
+    if (a.signal==='squeeze'&&b.signal==='squeeze')  signal='squeeze';
+    else if (a.signal==='breakout'||b.signal==='breakout') signal='breakout';
+    else if (a.signal!=='none'||b.signal!=='none')   signal='watch';
+    return {...a, scoreDots:dots, signal};
+  }
+  return null;
+}
+
+async function scanAll() {
+  if (isScanning) return;
+  isScanning = true;
+  setStatus('connecting','Scanning…');
+  stopCountdown();
+
+  const needBoth = currentTf==='both';
+  let loaded = 0;
+
+  const jobs = PAIRS.map(async sym => {
+    try {
+      const c15 = await fetchKlines(sym,'15m',120);
+      const ind15 = computeIndicators(c15);
+      if (!scanResults[sym]) scanResults[sym]={};
+      scanResults[sym].m15 = ind15;
+
+      if (needBoth || currentTf==='1h') {
+        const c1h = await fetchKlines(sym,'1h',120);
+        scanResults[sym].h1 = computeIndicators(c1h);
+      }
+      loaded++;
+      document.getElementById('progressFill').style.width = (loaded/PAIRS.length*100).toFixed(0)+'%';
+      document.getElementById('pairStatus').textContent = `${loaded} / ${PAIRS.length} pairs loaded`;
+      renderAll();
+    } catch(e) {
+      console.warn(sym, e.message);
+    }
+  });
+
+  await Promise.allSettled(jobs);
+
+  document.getElementById('progressFill').style.width='100%';
+  isScanning = false;
+
+  if (loaded===0) {
+    setStatus('error','Fetch failed');
+    document.getElementById('errBar').textContent='Could not reach api.binance.com. Check your internet connection or try disabling a VPN/firewall.';
+    document.getElementById('errBar').style.display='block';
+  } else {
+    setStatus('live',`Live · ${loaded} pairs`);
+    document.getElementById('errBar').style.display='none';
+    document.getElementById('lastUpdate').textContent=`Updated: ${new Date().toLocaleTimeString()}`;
+    startCountdown(REFRESH_SEC);
+  }
+}
+
+function startCountdown(sec) {
+  countSec = sec;
+  const ring = document.getElementById('countRing');
+  const num  = document.getElementById('countNum');
+  const circumference = 69.1;
+  if (countTimer) clearInterval(countTimer);
+  countTimer = setInterval(()=>{
+    countSec--;
+    num.textContent = countSec;
+    ring.style.strokeDashoffset = (circumference * (1 - countSec/sec)).toFixed(2);
+    if (countSec <= 0) {
+      clearInterval(countTimer);
+      scanAll();
+    }
+  }, 1000);
+  num.textContent = sec;
+  ring.style.strokeDashoffset = '0';
+}
+
+function stopCountdown() {
+  if (countTimer) clearInterval(countTimer);
+  document.getElementById('countNum').textContent='—';
+  document.getElementById('countRing').style.strokeDashoffset='69.1';
+}
+
+function setStatus(state, label) {
+  const pill=document.getElementById('livePill');
+  const dot=document.getElementById('liveDot');
+  pill.className='live-pill '+state;
+  dot.className='live-dot'+(state==='live'?' pulse':'');
+  document.getElementById('liveLabel').textContent=label;
+}
+
+function priceFmt(p) {
+  if(p>=10000) return '$'+p.toFixed(0);
+  if(p>=1000)  return '$'+p.toFixed(1);
+  if(p>=10)    return '$'+p.toFixed(2);
+  if(p>=1)     return '$'+p.toFixed(3);
+  return '$'+p.toFixed(4);
+}
+function volChip(r,low,high) {
+  if(low)  return `<span class="vc vc-low">▼ ${r.toFixed(2)}×</span>`;
+  if(high) return `<span class="vc vc-high">▲ ${r.toFixed(2)}×</span>`;
+  return `<span class="vc vc-norm">${r.toFixed(2)}×</span>`;
+}
+function sigBadge(s) {
+  if(s==='squeeze')  return `<span class="sig sig-sq">⚡ BB Squeeze</span>`;
+  if(s==='breakout') return `<span class="sig sig-br">↗ Breakout</span>`;
+  if(s==='watch')    return `<span class="sig sig-wa">👁 Watch</span>`;
+  return `<span class="sig sig-no">Neutral</span>`;
+}
+function dotsHtml(dots) {
+  const all=['purple','green','amber','blue','coral'];
+  const bg={purple:'#7f77dd',green:'#1d9e75',amber:'#ef9f27',blue:'#378add',coral:'#d85a30'};
+  return all.map(c=>`<div class="sd" style="background:${dots.includes(c)?bg[c]:'rgba(255,255,255,0.1)'}"></div>`).join('');
+}
+function scoreColor(n){return n>=4?'#1d9e75':n>=2?'#ef9f27':'#555870';}
+
+function renderAll() {
+  const data = PAIRS.map(sym=>{
+    const ind=getMerged(sym);
+    return ind ? {sym, displaySym:DISP[sym], ...ind} : null;
+  }).filter(Boolean);
+
+  document.getElementById('mSq').textContent   = data.filter(d=>d.signal==='squeeze').length;
+  document.getElementById('mBr').textContent   = data.filter(d=>d.signal==='breakout').length;
+  document.getElementById('mVol').textContent  = data.filter(d=>d.volLow).length;
+  document.getElementById('mConf').textContent = data.filter(d=>d.scoreDots.length>=4).length;
+
+  const filtered = currentFilter==='all' ? data : data.filter(d=>d.signal===currentFilter);
+  const sorted   = [...filtered].sort((a,b)=>b.scoreDots.length-a.scoreDots.length||a.bbW-b.bbW);
+  const body = document.getElementById('tableBody');
+
+  if (!sorted.length) {
+    body.innerHTML=`<div class="loading-state" style="color:#555870">No pairs match — try a different filter or wait for the next scan</div>`;
+    return;
+  }
+
+  const tfLabel = currentTf==='both'?'15m+1h':currentTf;
+  body.innerHTML = sorted.map(d=>{
+    const prev=lastPrices[d.sym];
+    const flashClass = prev ? (d.price>prev?' flash-up':d.price<prev?' flash-dn':'') : '';
+    lastPrices[d.sym]=d.price;
+    const dir = d.price>=d.prevPrice?'up':'dn';
+    return `<div class="trow${flashClass}">
+      <div><div class="pname">${d.displaySym}</div><div class="psub">Binance · ${tfLabel}</div></div>
+      <div class="pval ${dir}">${priceFmt(d.price)}</div>
+      <div>
+        <div class="bwn" style="color:${d.bbW<2?'#7f77dd':d.bbW<3?'#ef9f27':'#8b8fa8'}">${d.bbW.toFixed(2)}%</div>
+        <div class="bwt"><div class="bwf" style="width:${Math.min(d.bbW/6*100,100).toFixed(1)}%;background:${d.bbW<2?'#7f77dd':d.bbW<3?'#ef9f27':'rgba(255,255,255,.12)'}"></div></div>
+      </div>
+      <div>${volChip(d.volRatio,d.volLow,d.volHigh)}</div>
+      <div>${sigBadge(d.signal)}</div>
+      <div class="sdots">${dotsHtml(d.scoreDots)}</div>
+      <div class="scn" style="color:${scoreColor(d.scoreDots.length)}">${d.scoreDots.length}/5</div>
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('tfControls').addEventListener('click', e=>{
+  const btn=e.target.closest('.tf-btn');
+  if(!btn) return;
+  document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  currentTf=btn.dataset.tf;
+  scanResults={};
+  stopCountdown();
+  scanAll();
+});
+
+document.querySelectorAll('.fb').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.fb').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter=btn.dataset.filter;
+    renderAll();
+  });
+});
+
+scanAll();
+</script>
+</body>
+</html>
